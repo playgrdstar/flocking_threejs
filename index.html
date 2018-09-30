@@ -1,7 +1,7 @@
 <!-- Gary Ang | Ming | playgrd -->
 <!-- playgrd.com -->
 <!-- three.js port of Daniel Shiffman's Nature of Code Chapter 2-->
-<!-- Separate and seek selected sphere, which will turn red when moused over -->
+<!-- Flocking -->
 
 
 
@@ -9,7 +9,7 @@
 <html lang="en">
     <head>
         <meta charset="utf-8">
-        <title>Nature of Code in three.js</title>
+        <title>Nature of Code port in three.js</title>
         <style>
         </style>
         <script type="text/javascript" src="./libs/three.js"></script>
@@ -22,14 +22,15 @@
 
     <div id='svg'></div>
         <script>
-// http://jsfiddle.net/jayfield1979/qGPTT/2/
             var p5 = new p5();
             
 
             var scene = new THREE.Scene();
-            // var camera = new THREE.PerspectiveCamera( 1000, window.innerWidth / window.innerHeight, 0.1, 1000 );
-            var camera = new THREE.OrthographicCamera( -10,60,-10,60, 0.1, 1000 );
-            camera.position.z = 50;
+            var camera = new THREE.PerspectiveCamera( 100, window.innerWidth / window.innerHeight, 0.1, 1000 );
+            // var camera = new THREE.OrthographicCamera( -10,60,-10,60, 0.1, 1000 );
+            camera.position.z = 75;
+            camera.position.x = 50;
+            camera.position.y = 50;
 
             var renderer = new THREE.WebGLRenderer( { antialias: true } );
             renderer.setPixelRatio( window.devicePixelRatio );
@@ -65,64 +66,32 @@
                 mover.initialise();
                 movers.push(mover);
             }
-            console.log(movers)
             scene.add( group );
 
             var prevFog = true;
 
-            var raycaster = new THREE.Raycaster();
-            var mouse = new THREE.Vector2();
-
-            function onMouseMove( event ) {
-
-                // calculate mouse position in normalized device coordinates
-                // (-1 to +1) for both components
-
-                mouse.x = ( event.clientX / window.innerWidth ) * 2 - 1;
-                mouse.y = - ( event.clientY / window.innerHeight ) * 2 + 1;
-
-                // console.log(mouse);
-
-            }
-            document.addEventListener('mousemove', onMouseMove, false);
 
             // var wind = new THREE.Vector2(0.1,0);
             // var gravity = new THREE.Vector2(0,0.000001);
 
-            var pos = new THREE.Vector3();
+            group.position.x += 50;
+            group.position.y += 50;
             var render = function () {
 
                 requestAnimationFrame( render );
                 // orbit.update();
                 for (var i = 0; i < 50; i++) {
                     movers[i].checkEdges();
-                    movers[i].applyBehaviors();
+                    movers[i].flock(movers);
                     movers[i].update();
-                    
                     movers[i].display();
                 }
 
-                // update the picking ray with the camera and mouse position
-                raycaster.setFromCamera( mouse, camera );
-                // console.log('Children', scene.children[3].children);
-
-                // calculate objects intersecting the picking ray
-                var intersects = raycaster.intersectObjects( scene.children[3].children );
-
-                for ( var i = 0; i < intersects.length; i++ ) {
-
-                    intersects[ i ].object.material.color.set( 0xff0000 );
-                    pos = intersects[ i ].object.position;
-                    // console.log("hit", pos);
-
-                }
-                
-                // mover.applyForce(wind);
-                // mover.applyForce(gravity);
 
                 // group.rotation.x += 0.002;
-                // group.rotation.y += 0.02;
-                // group.rotation.z += 0.002;
+
+                group.rotation.y += 0.002;
+                group.rotation.z += 0.002;
 
                 renderer.render( scene, camera );
 
@@ -147,7 +116,7 @@
                 this.acceleration = new THREE.Vector3();
 
                 this.r = 12;
-                this.maxspeed = 3;
+                this.maxspeed = 1;
                 this.maxforce = 0.2;
 
                 var geometry = new THREE.SphereGeometry(1,10,10);
@@ -159,21 +128,29 @@
                     
                     this.position.x = Math.random()*25;
                     this.position.y = Math.random()*10;
+                    this.position.z = Math.random()*10;
                     this.velocity.x = 0.1;
                     this.velocity.y = 0.1;
+                    this.velocity.z = 0.1;
                     this.acceleration.x = 0.0;
                     this.acceleration.y = 0.0;
-                    this.mass = 100;
+                    this.acceleration.z = 0.0;
+                    this.mass = 1000;
                     // console.log('Initialise', this.position);                    
                 }
 
-                this.applyBehaviors = function(movers) {
-                    var separateForce = this.separate(movers);
-                    // var vector = new THREE.Vector3(25, 25, 0);
-                    var seekForce = this.seek(pos);
-                    seekForce.divideScalar(2);
-                    this.applyForce(separateForce);
-                    this.applyForce(seekForce);
+                this.flock = function(movers) {
+                    var sep = this.separate(movers);   // Separation
+                    var ali = this.align(movers);      // Alignment
+                    var coh = this.cohesion(movers);   // Cohesion
+                    // Arbitrarily weight these forces
+                    sep.multiplyScalar(1.5);
+                    ali.multiplyScalar(1.0);
+                    coh.multiplyScalar(1.0);
+                    // Add the force vectors to acceleration
+                    this.applyForce(sep);
+                    this.applyForce(ali);
+                    this.applyForce(coh);
                 };
 
 
@@ -183,8 +160,8 @@
                 }
 
                 this.separate = function(vehicles) {
-                    var desiredseparation = 2;
-                    var sum = new THREE.Vector3();
+                    var desiredseparation = 20;
+                    var steer = new THREE.Vector3();
                     var count = 0;
                     // For every boid in the system, check if it's too close
                     for (var i = 0; i < movers.length; i++) {
@@ -196,21 +173,70 @@
                             var diff = pos.sub(movers[i].position);
                             diff.normalize();
                             diff.divideScalar(d);        // Weight by distance
-                            sum.add(diff);
+                            steer.add(diff);
                             count++;            // Keep track of how many
                         }
                     }
                     // Average -- divide by how many
                     if (count > 0) {
-                    sum.divideScalar(count);
-                    // Our desired vector is the average scaled to maximum speed
-                    sum.normalize();
-                    sum.multiplyScalar(this.maxspeed);
-                    // Implement Reynolds: Steering = Desired - Velocity
-                    sum.sub(this.velocity);
-                    // sum.limit(this.maxforce);
+                        steer.divideScalar(count);
                     }
-                    return sum;
+
+                    if (steer.length > 0){
+                        // Our desired vector is the average scaled to maximum speed
+                        steer.normalize();
+                        steer.multiplyScalar(this.maxspeed);
+                        // Implement Reynolds: Steering = Desired - Velocity
+                        steer.sub(this.velocity);
+                        // sum.limit(this.maxforce);
+                    }
+                    return steer;
+                };
+
+                // Alignment
+                // For every nearby boid in the system, calculate the average velocity
+                this.align = function(movers) {
+                    var neighbordist = 8;
+                    var alignsteer = new THREE.Vector3();
+                    var count = 0;
+                    for (var i = 0; i < movers.length; i++) {
+                        var d = this.position.distanceTo(movers[i].position);
+                        if ((d > 0) && (d < neighbordist)) {
+                        alignsteer.add(movers[i].velocity);
+                        count++;
+                        }
+                    }
+                    if (count > 0) {
+                        alignsteer.divideScalar(count);
+                        alignsteer.normalize();
+                        alignsteer.multiplyScalar(this.maxspeed);
+                        var steer = alignsteer.sub(this.velocity);
+                        // steer.limit(this.maxforce);
+                        return steer;
+                    } else {
+                        return new THREE.Vector3();   
+                    }
+                };
+
+                // Cohesion
+                // For the average location (i.e. center) of all nearby boids, calculate steering vector towards that location
+                this.cohesion = function(movers) {
+                    var neighbordist = 3;
+                    var cohesionsteer = new THREE.Vector3();   
+                    var count = 0;
+                    for (var i = 0; i < movers.length; i++) {
+                        var d = this.position.distanceTo(movers[i].position);
+                        if ((d > 0) && (d < neighbordist)) {
+                            cohesionsteer.add(movers[i].position); // Add location
+                            count++;
+                        }
+                    }
+                    if (count > 0) {
+                        cohesionsteer.divideScalar(count);
+                        return this.seek(cohesionsteer);  // Steer towards the location
+                    } else {
+                        return new THREE.Vector3();
+                    }
                 };
 
                 this.seek = function(target) {
@@ -266,7 +292,16 @@
                     else if (this.position.y < 0){
                         this.position.y = 0;
                         this.velocity.y *= -1;
-                    }                    
+                    }     
+
+                    if (this.position.z > 50){
+                        this.position.z = 50;
+                        this.velocity.z *= -1;
+                    }
+                    else if (this.position.z < 0){
+                        this.position.z = 0;
+                        this.velocity.z *= -1;
+                    }                   
 
             }
         }
